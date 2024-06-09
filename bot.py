@@ -1,72 +1,63 @@
 import os
 import requests
-import telebot
-from datetime import date
+from telebot import TeleBot
+from datetime import datetime
+from dateutil.parser import parse
 
-# Replace with your actual Telegram bot token
+# Retrieve bot token from environment variable
 BOT_TOKEN = os.environ.get("7149381183:AAEvLoeModFw-mkZNzrWzrAR_fRjPIgwETw")
+POLLING_TIMEOUT = None
 
-bot = telebot.TeleBot(BOT_TOKEN)
+# Initialize the bot
+bot = TeleBot("7149381183:AAEvLoeModFw-mkZNzrWzrAR_fRjPIgwETw")
 
-def get_holidays(country_code: str, year: int = date.today().year) -> dict:
-    url = "https://calendarific.com/api/v2/holidays?"
-    params = {
-        "api_key": "nP5EjQWi9KDHNzVOySuULjOKLdgn6o",
-        "country": country_code.upper(),
-        "year": year
-    }
 
-    response = requests.get(url, params=params)
-    response.raise_for_status()
-
-    return response.json().get("response", {}).get("holidays", [])
-
-def get_country_preference(message):
-    user_id = message.chat.id
-
-    # Example (replace with your preference storage implementation):
-    return user_preferences.get(user_id, None)
-
-# Message handler for "/start" command
 @bot.message_handler(commands=["start"])
-def start_handler(message):
-    bot.reply_to(message, "Salom, Sizga qanday yordam berishim mumkin?")
+def send_welcome(message):
+    bot.send_message(message.chat.id, "Salom, Men sizga qanday yordam bera olaman?")
 
-# Message handler for "/holiday" command
+
 @bot.message_handler(commands=["holiday"])
-def holiday_handler(message):
-    country_code = get_country_preference(message)  # Retrieve user's preferred country code
-
-    if not country_code:
-        # Offer options to set or view preferred country code
-        options_markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-        options_markup.add("Mamlakat kodini o'rnatish", "Mavjud kodni ko'rish")
-        bot.reply_to(message, "Sizga qaysi davlat kerak?\nTanlang:", reply_markup=options_markup)
-        return
-
-    try:
-        holidays = get_holidays(country_code)
-        if not holidays:
-            bot.reply_to(message, f"Siz tanlagan mamlakatda ({country_code.upper()}) 2024-yil uchun dam olish kunlari topilmadi.")
-            return
-
-        holiday_info = "\n".join(f"{h['date']['iso']}: {h['name']}" for h in holidays)
-        bot.reply_to(message, f"{country_code.upper()}dagi dam olish kunlari:\n{holiday_info}")
-    except requests.exceptions.RequestException as e:
-        bot.reply_to(message, f"Dam olish kunlari ma'lumotlarini olishda xatolik yuzaga keldi: {e}")
-
-# Message handler for setting/viewing country code preference
-@bot.message_handler(func=lambda msg: msg.text in ("Mamlakat kodini o'rnatish", "Mavjud kodni ko'rish"))
-def handle_country_preference(message):
-    user_id = message.chat.id
-    if message.text == "Mamlakat kodini o'rnatish":
-        # Prompt user to enter their preferred country code
-        bot.reply_to(message, "Iltimos, siz yashash mamlakatingiz kodini kiriting (masalan, UZ):")
+def ask_country_code(message):
+    """Prompts user for country code for holiday information."""
+    Davlat = "Dam olish kunlari uchun davlat kodini kiriting (masalan, UZ):"
+    bot.send_message(message.chat.id, Davlat)
+    bot.register_next_step_handler(message, fetch_holidays)
 
 
-    elif message.text == "Mavjud kodni ko'rish":
-        country_code = get_country_preference(message)
-        if country_code:
-            bot.reply_to(message, f"Sizning hozirgi mamlakat kodingiz: {country_code.upper()}")
+def fetch_holidays(message):
+    country_code = message.text.upper()
+    year = 2024
+    api_key = "nP5EjQWi9KDHNzVOySuULjOKLdgn6oWW"
+    url = f"https://calendarific.com/api/v2/holidays?&api_key={api_key}&country={country_code}&year={year}"
+
+    response = requests.get(url)
+
+    if response.status_code == 200:
+        holidays = response.json().get('response', {}).get('holidays', [])
+        if holidays:
+            holiday_message = "Dam olish kunlari:\n\n"
+            for holiday in holidays:
+                name = holiday['name']
+                start_date = holiday['date']['iso']
+                end_date = holiday['date'].get('end', start_date)  # Use start date if end date is not provided
+
+                # Calculate the number of days
+                start_date_obj = parse(start_date)
+                end_date_obj = parse(end_date)
+                duration = (end_date_obj - start_date_obj).days + 1
+
+                holiday_message += f"{name} - {start_date[:10]} ( {duration} kun dam olish)\n"
+            bot.send_message(message.chat.id, holiday_message)
         else:
-            bot
+            bot.send_message(message.chat.id, "Hech qanday dam olish kuni topilmadi.")
+    else:
+        bot.send_message(message.chat.id,
+                         "Ma'lumotni olishda xatolik yuz berdi. Iltimos, keyinroq qayta urinib ko'ring.")
+
+    # Re-prompt for another country code
+    ask_country_code(message)
+
+
+if __name__ == "__main__":
+    bot.polling(timeout=POLLING_TIMEOUT)
